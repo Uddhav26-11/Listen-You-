@@ -3,8 +3,6 @@ import dotenv from "dotenv";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
-import path from "path";
-import { fileURLToPath } from "url";
 import { createServer } from "http";
 import { Server } from "socket.io";
 
@@ -15,8 +13,6 @@ import { notFound, errorHandler } from "./middleware/error.middleware.js";
 
 dotenv.config();
 connectDB();
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 const httpServer = createServer(app);
@@ -37,9 +33,6 @@ app.use(
 app.use(express.json());
 app.use(cookieParser());
 if (process.env.NODE_ENV !== "production") app.use(morgan("dev"));
-
-// Serve saved consultation recordings
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 app.get("/api/health", (req, res) => res.json({ status: "ok" }));
 app.use("/api/auth", authRoutes);

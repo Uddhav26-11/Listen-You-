@@ -1,9 +1,7 @@
-import fs from "fs";
-import path from "path";
 import Consultation from "../models/Consultation.model.js";
 import User from "../models/User.model.js";
 import { chatCompletion, textToSpeech } from "../utils/openai.js";
-import { RECORDINGS_DIR } from "../middleware/upload.middleware.js";
+import { uploadRecordingBuffer, deleteRecording } from "../config/cloudinary.js";
 
 const FALLBACK_GREETING =
   "Hi, I'm Dr. Listen. I'm really glad you're here today. How are you feeling right now?";
@@ -235,7 +233,8 @@ export const chatTurn = async (req, res, next) => {
 
 // @route POST /api/consultations/:id/recording
 // Receives the recorded webm blob (video+audio) from MediaRecorder on the
-// client once the call ends, and stores it under server/uploads/recordings.
+// client once the call ends, and uploads it to Cloudinary (never touches
+// local disk — the host's filesystem is ephemeral and would lose it).
 export const uploadRecording = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -247,16 +246,21 @@ export const uploadRecording = async (req, res, next) => {
       return res.status(400).json({ message: "No recording file received" });
     }
 
+    const publicId = `consultation-${id}-${Date.now()}`;
+    const result = await uploadRecordingBuffer(req.file.buffer, { publicId });
+
     consultation.recording = {
-      videoUrl: `/uploads/recordings/${req.file.filename}`,
+      videoUrl: result.secure_url,
       audioUrl: null,
+      publicId: result.public_id,
       storedAt: new Date(),
     };
     await consultation.save();
 
     res.status(200).json({ message: "Recording saved", videoUrl: consultation.recording.videoUrl });
   } catch (error) {
-    next(error);
+    console.error("Recording upload to Cloudinary failed:", error.message);
+    res.status(502).json({ message: "Could not save the recording. Please try again." });
   }
 };
 
@@ -390,14 +394,10 @@ export const deleteConsultation = async (req, res, next) => {
       return res.status(404).json({ message: "Consultation not found" });
     }
 
-    const videoUrl = consultation.recording?.videoUrl;
-    if (videoUrl) {
-      const filename = path.basename(videoUrl);
-      const filePath = path.join(RECORDINGS_DIR, filename);
-      fs.unlink(filePath, (err) => {
-        if (err && err.code !== "ENOENT") {
-          console.error("Failed to delete recording file:", err.message);
-        }
+    const publicId = consultation.recording?.publicId;
+    if (publicId) {
+      deleteRecording(publicId).catch((err) => {
+        console.error("Failed to delete recording from Cloudinary:", err.message);
       });
     }
 
