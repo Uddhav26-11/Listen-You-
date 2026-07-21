@@ -1,0 +1,159 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply text-slate-800;
+  font-family: "Inter", system-ui, sans-serif;
+  background: linear-gradient(135deg, #dceaff 0%, #eaf0ff 22%, #f3e8ff 48%, #ffe8f4 68%, #e6f4ea 100%);
+  background-size: 200% 200%;
+  background-attachment: fixed;
+  animation: bgShift 18s ease-in-out infinite;
+  min-height: 100vh;
+}
+
+@keyframes bgShift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.font-display {
+  font-family: "Fraunces", serif;
+}
+
+/* ---------- Premium glassmorphism helpers ---------- */
+.glass-panel {
+  @apply bg-white/60 backdrop-blur-md;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.glass-card {
+  @apply bg-white/70 backdrop-blur-md;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  transition: transform 0.25s ease, box-shadow 0.25s ease, background-color 0.25s ease;
+}
+
+.glass-card:hover {
+  transform: translateY(-3px);
+  background-color: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 16px 40px -12px rgba(91, 141, 239, 0.25);
+}
+
+.premium-gradient-text {
+  background: linear-gradient(90deg, #5b8def, #8b7cf6);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---------- Gradient button ---------- */
+.gradient-btn {
+  background: linear-gradient(120deg, #5b8def 0%, #8b7cf6 55%, #4fbf8b 100%);
+  background-size: 200% 200%;
+  transition: background-position 0.5s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+.gradient-btn:hover {
+  background-position: 100% 0%;
+}
+
+.gradient-btn-danger {
+  background: linear-gradient(120deg, #ef4444 0%, #f97316 100%);
+  background-size: 200% 200%;
+  transition: background-position 0.5s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+.gradient-btn-danger:hover {
+  background-position: 100% 0%;
+}
+
+/* ---------- Gradient border card (glowing outline via padding trick) ---------- */
+.gradient-border-card {
+  position: relative;
+  border-radius: 28px;
+  background: linear-gradient(135deg, rgba(91,141,239,0.55), rgba(139,124,246,0.55), rgba(79,191,139,0.55));
+  padding: 1.5px;
+}
+.gradient-border-card > .gradient-border-card-inner {
+  border-radius: 26.5px;
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(12px);
+}
+
+/* ---------- Fade-in on mount ---------- */
+@keyframes fadeInUp {
+  0% { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.fade-in-up {
+  animation: fadeInUp 0.5s ease-out both;
+}
+
+/* ---------- Soft glow pulse (used for live/recording indicators) ---------- */
+@keyframes softGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(91, 141, 239, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(91, 141, 239, 0); }
+}
+.soft-glow {
+  animation: softGlow 2s ease-in-out infinite;
+}
+
+/* Ambient animated gradient blobs used behind the consultation screen */
+.ambient-blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(60px);
+  opacity: 0.35;
+  animation: float 12s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(20px, -30px) scale(1.08); }
+}
+
+@keyframes breathe {
+  0%, 100% { transform: scale(1); opacity: 0.55; }
+  50% { transform: scale(1.12); opacity: 0.15; }
+}
+
+.breathing-ring {
+  animation: breathe 3.2s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0.05); }
+}
+
+.eye-blink {
+  animation: blink 4.5s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes sway {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(0.8deg); }
+}
+
+.head-sway {
+  animation: sway 6s ease-in-out infinite;
+  transform-origin: center bottom;
+}
+
+@keyframes ringPulse {
+  0% { transform: scale(0.9); opacity: 0.6; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+.ring-pulse {
+  animation: ringPulse 1.6s ease-out infinite;
+}
+
+@keyframes speakGlow {
+  0%, 100% { box-shadow: 0 0 20px 2px rgba(139, 124, 246, 0.35), 0 0 0 1px rgba(139, 124, 246, 0.25) inset; }
+  50% { box-shadow: 0 0 34px 6px rgba(139, 124, 246, 0.55), 0 0 0 1px rgba(139, 124, 246, 0.35) inset; }
+}
+.speak-glow {
+  animation: speakGlow 1.4s ease-in-out infinite;
+}
