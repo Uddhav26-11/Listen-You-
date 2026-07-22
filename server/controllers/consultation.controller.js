@@ -134,13 +134,18 @@ export const startConsultation = async (req, res, next) => {
 // real TTS model, so the client can play + record it directly through the
 // Web Audio API — no screen/tab-share permission needed at all, unlike the
 // browser's speechSynthesis (which has no way to expose its audio as a
-// stream). English/Hinglish only for now — Groq's TTS model has no Hindi
-// voice yet, so the client falls back to on-device speechSynthesis for
-// Devanagari text (that part just won't be in the saved recording).
+// stream, so anything spoken that way can never end up in the recording).
+// `language` is just a hint ("en" | "hi") the client sends based on the
+// script of the reply — it's used to pick the best available voice/model
+// for that language. We ALWAYS attempt real TTS here regardless of
+// language; if the underlying model genuinely can't produce a given
+// language, textToSpeech throws and the client falls back to on-device
+// speechSynthesis for that one line (which won't be in the recording, but
+// at least everything the model CAN handle now correctly makes it in).
 export const speak = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { text } = req.body;
+    const { text, language } = req.body;
 
     if (!text || !text.trim()) {
       return res.status(400).json({ message: "text is required" });
@@ -151,7 +156,7 @@ export const speak = async (req, res, next) => {
       return res.status(404).json({ message: "Consultation not found" });
     }
 
-    const audioBuffer = await textToSpeech(text.trim());
+    const audioBuffer = await textToSpeech(text.trim(), { language });
     res.set({
       "Content-Type": "audio/wav",
       "Content-Length": audioBuffer.length,

@@ -14,6 +14,10 @@ import api from "../api/axios.js";
 
 const RING_DURATION_MS = 2000;
 const CONNECT_DELAY_MS = 700;
+// How long Dr. Listen waits, after the user has *completely* stopped
+// speaking, before generating/speaking a response. Any new speech (interim
+// or final) restarts this window from zero.
+const USER_SILENCE_DELAY_MS = 4000;
 
 const SpeechRecognitionCtor =
   typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
@@ -48,6 +52,9 @@ export default function ConsultationCall({
   const timerRef = useRef(null);
   const recognitionRef = useRef(null);
   const shouldListenRef = useRef(false);
+  const silenceTimerRef = useRef(null); // the 4s "user finished speaking" countdown
+  const pendingTextRef = useRef(""); // accumulated final transcript waiting out the silence window
+  const currentTtsSourceRef = useRef(null); // in-flight AudioBufferSourceNode, so we can stop it cleanly on endCall
   const userStreamRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const recordedChunksRef = useRef([]);
@@ -115,10 +122,33 @@ export default function ConsultationCall({
         if (event.results[i].isFinal) finalText += piece;
         else interim += piece;
       }
+
+      // Any new speech activity — interim or final — means the user is
+      // still talking (or just started again), so cancel any pending
+      // "respond now" timer. It gets rescheduled below once we see a
+      // final chunk, i.e. once they actually pause again.
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
+
       if (interim) setInterimText(interim);
       if (finalText.trim()) {
         setInterimText("");
-        handleUserUtterance(finalText.trim());
+        pendingTextRef.current = pendingTextRef.current
+          ? `${pendingTextRef.current} ${finalText.trim()}`
+          : finalText.trim();
+
+        // Start the 4-second silence timer only now, after this chunk of
+        // speech has completely ended. If the user starts speaking again
+        // before it fires, the clearTimeout above cancels it and this
+        // whole thing restarts based on the latest accumulated text.
+        silenceTimerRef.current = setTimeout(() => {
+          silenceTimerRef.current = null;
+          const text = pendingTextRef.current.trim();
+          pendingTextRef.current = "";
+          if (text) handleUserUtterance(text);
+        }, USER_SILENCE_DELAY_MS);
       }
     };
 
@@ -152,6 +182,11 @@ export default function ConsultationCall({
 
   const pauseRecognition = () => {
     shouldListenRef.current = false;
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    pendingTextRef.current = "";
     try {
       recognitionRef.current?.stop();
     } catch {
@@ -212,20 +247,21 @@ export default function ConsultationCall({
 
     // The AI mirrors whatever the user actually said, which can drift from
     // the initial language toggle (e.g. Hinglish) — so decide per-reply
-    // based on the reply's own script, not the toggle.
+    // based on the reply's own script, not the toggle. We still ALWAYS try
+    // the server TTS pipeline first (it's the only path that ends up in the
+    // recording) — Devanagari text used to skip straight to the on-device,
+    // unrecorded fallback, which is exactly why Hindi replies were missing
+    // from the saved recording. Now the language is only a hint sent to the
+    // server (for voice/model selection) and, if the server call still
+    // fails, for picking the right on-device fallback voice.
     const isDevanagari = /[\u0900-\u097F]/.test(text);
-    if (isDevanagari) {
-      setAiVoiceInRecording(false);
-      speakWithBrowserFallback(text, onDone, { isDevanagari: true });
-      return;
-    }
 
     const myRequestId = ++ttsRequestIdRef.current;
     try {
       const audioCtx = ensureAudioGraph();
       const res = await api.post(
         `/consultations/${consultationIdRef.current}/speech`,
-        { text },
+        { text, language: isDevanagari ? "hi" : "en" },
         { responseType: "arraybuffer" }
       );
       // If the call ended or another turn started while we were waiting,
@@ -236,14 +272,24 @@ export default function ConsultationCall({
       }
 
       const audioBuffer = await audioCtx.decodeAudioData(res.data);
+      // Re-check after the (async) decode too — a call-end or new turn can
+      // land in the gap between the fetch resolving and decode finishing.
+      if (myRequestId !== ttsRequestIdRef.current || phaseRef.current !== "active") {
+        onDone?.();
+        return;
+      }
       const source = audioCtx.createBufferSource();
       source.buffer = audioBuffer;
       // Route to speakers (so the user can hear it) AND into the recording
       // destination (so it ends up in the saved file) at the same time.
       source.connect(audioCtx.destination);
       if (audioDestRef.current) source.connect(audioDestRef.current);
+      currentTtsSourceRef.current = source;
       setAiVoiceInRecording(true);
-      source.onended = () => onDone?.();
+      source.onended = () => {
+        if (currentTtsSourceRef.current === source) currentTtsSourceRef.current = null;
+        onDone?.();
+      };
       source.start();
     } catch (err) {
       if (myRequestId !== ttsRequestIdRef.current) return;
@@ -268,7 +314,7 @@ export default function ConsultationCall({
           { duration: 6000 }
         );
       }
-      speakWithBrowserFallback(text, onDone, { isDevanagari: false });
+      speakWithBrowserFallback(text, onDone, { isDevanagari });
     }
   };
 
@@ -431,6 +477,18 @@ export default function ConsultationCall({
         }
       };
       try {
+        // Force any audio/video already buffered internally (since the
+        // last 1s timeslice tick) to fire an ondataavailable event right
+        // now, instead of waiting for the next tick — otherwise stop()
+        // can race ahead and the final seconds of the call get dropped
+        // from the recorded chunks before the Blob is built in onstop.
+        if (mr.state === "recording") {
+          mr.requestData();
+        }
+      } catch {
+        /* not supported everywhere — stop() still flushes a final chunk */
+      }
+      try {
         mr.stop();
       } catch {
         resolve();
@@ -520,8 +578,19 @@ export default function ConsultationCall({
     setRecording(false);
     onRecordingChange?.({ recording: false, seconds: recordSeconds });
     clearInterval(timerRef.current);
-    pauseRecognition();
+    pauseRecognition(); // also clears any pending 4s silence timer + buffered text
+    // Invalidate any TTS fetch that's still in flight so it can't connect
+    // audio nodes into a graph we're about to tear down, and stop whatever
+    // is currently playing so the recording ends cleanly rather than being
+    // cut off mid-word by the recorder stopping underneath it.
+    ttsRequestIdRef.current += 1;
     window.speechSynthesis?.cancel();
+    try {
+      currentTtsSourceRef.current?.stop();
+    } catch {
+      /* already stopped/ended */
+    }
+    currentTtsSourceRef.current = null;
 
     const finalSeconds = recordSeconds;
     await stopRecordingAndUpload();
@@ -549,9 +618,14 @@ export default function ConsultationCall({
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      pauseRecognition();
+      pauseRecognition(); // also clears the silence timer + buffered text
       window.speechSynthesis?.cancel();
       clearInterval(timerRef.current);
+      try {
+        currentTtsSourceRef.current?.stop();
+      } catch {
+        /* noop */
+      }
       try {
         if (mediaRecorderRef.current?.state !== "inactive") mediaRecorderRef.current?.stop();
       } catch {
@@ -702,8 +776,9 @@ export default function ConsultationCall({
 
               <p className="max-w-xs text-center text-[11px] text-slate-400">
                 Recording includes your video + voice, and Dr. Listen's voice too — no
-                screen sharing needed. (Hindi replies are spoken on-device and won't be
-                in the saved recording, but are always saved in the text transcript.)
+                screen sharing needed, in English or Hindi. (If a reply's voice ever can't
+                be generated, that line is still spoken on-device and always saved in the
+                text transcript.)
               </p>
 
               <motion.button
